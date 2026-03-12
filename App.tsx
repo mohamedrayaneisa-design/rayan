@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Database, SearchX, Search, Upload, Download, ShieldCheck, ListFilter, AlertTriangle, Activity, Settings, ClipboardList, Archive, Copy, Hourglass, Play, LayoutGrid, Repeat, ShieldAlert } from 'lucide-react';
+import { Database, SearchX, Search, Upload, Download, ShieldCheck, ListFilter, AlertTriangle, Activity, Settings, ClipboardList, Archive, Copy, Hourglass, Play, LayoutGrid, Repeat, ShieldAlert, Ban } from 'lucide-react';
 import { User, ONTRecord, ONTStatus, FilterState, KPIStats } from './types';
 import { dbService } from './services/dbService';
 import { soundService } from './services/soundService';
@@ -113,6 +113,31 @@ const App: React.FC = () => {
     
     loadData();
   }, []);
+
+  // NEW: Polling for block status
+  const [isBlockedLive, setIsBlockedLive] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/status/${user.username}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.is_blocked) {
+            setIsBlockedLive(true);
+            setTimeout(() => {
+              dbService.setCurrentUser(null);
+              setUser(null);
+              setIsBlockedLive(false);
+            }, 5000); // Wait 5 seconds to show the effect before logging out
+          }
+        }
+      } catch (e) {
+        console.error("Failed to check block status", e);
+      }
+    }, 5000); // Check every 5 seconds
+    return () => clearInterval(interval);
+  }, [user]);
 
   // Compute SN counts map for duplicate detection
   const snCounts = useMemo(() => {
@@ -1467,6 +1492,30 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-transparent font-sans text-slate-200 flex overflow-hidden">
+      {isBlockedLive && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-red-950/90 backdrop-blur-xl animate-fade-in overflow-hidden">
+          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-40 mix-blend-overlay"></div>
+          <div className="absolute inset-0 bg-red-500/10 animate-pulse"></div>
+          <div className="relative z-10 flex flex-col items-center text-center p-8 max-w-md">
+            <div className="w-24 h-24 mb-6 rounded-full bg-red-500/20 flex items-center justify-center border border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.5)] animate-bounce">
+              <Ban className="w-12 h-12 text-red-500" />
+            </div>
+            <h1 className="text-4xl font-black text-white uppercase tracking-widest mb-4 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]">
+              Accès Refusé
+            </h1>
+            <p className="text-red-200 text-lg font-medium mb-8">
+              Votre compte a été bloqué par un administrateur.
+            </p>
+            <div className="w-full h-1 bg-red-900/50 rounded-full overflow-hidden">
+              <div className="h-full bg-red-500 animate-[shimmer_5s_linear_infinite] w-full origin-left"></div>
+            </div>
+            <p className="mt-4 text-xs text-red-400/70 font-mono uppercase tracking-widest">
+              Déconnexion en cours...
+            </p>
+          </div>
+        </div>
+      )}
+
       <LoadingOverlay isVisible={isLoading} progress={importProgress} activeTab={activeTab} />
       
       <SearchDialog 

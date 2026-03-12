@@ -37,4 +37,5 @@ export interface User {
   createdAt?: string;
   securityQuestion?: string;
   securityAnswer?: string;
+  is_blocked?: boolean;
 }

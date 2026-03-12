@@ -3,6 +3,7 @@ import { Settings, Volume2, VolumeX, Bell, Database, User as UserIcon, Shield, L
 import { soundService } from '../services/soundService';
 import { dbService } from '../services/dbService';
 import { User } from '../types';
+import { API_BASE_URL } from '../config';
 
 const SettingsPanel: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
@@ -64,18 +65,10 @@ const SettingsPanel: React.FC = () => {
 
       // Simulation delay
       setTimeout(async () => {
-          // Verify old password
-          const dbUser = await dbService.getUser(currentUser.username);
-          if (!dbUser || dbUser.password !== currentPassword) {
-              setSaveStatus('error');
-              setStatusMessage('Mot de passe actuel incorrect');
-              soundService.playError();
-              return;
-          }
-
-          // Update
-          const success = await dbService.updateUserPassword(currentUser.username, newPassword);
-          if (success) {
+          // Update via API
+          const result = await dbService.changePassword(currentUser.username, currentPassword, newPassword);
+          
+          if (result.success) {
               setSaveStatus('success');
               setStatusMessage('Enregistré avec succès');
               soundService.playSuccess();
@@ -90,7 +83,7 @@ const SettingsPanel: React.FC = () => {
               }, 3000);
           } else {
               setSaveStatus('error');
-              setStatusMessage('Erreur système');
+              setStatusMessage(result.message || 'Erreur système');
               soundService.playError();
           }
       }, 800);
@@ -207,7 +200,7 @@ const SettingsPanel: React.FC = () => {
                         
                         <div className="px-4 py-1.5 rounded-full bg-slate-800/80 border border-white/10 flex items-center gap-2 mb-8">
                             <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">{currentUser?.role || 'Technicien'}</span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">{currentUser?.role || 'User'}</span>
                         </div>
 
                         {/* Stats Box */}

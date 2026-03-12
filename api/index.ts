@@ -20,11 +20,21 @@ export const initDb = async () => {
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'Technicien',
+        role TEXT NOT NULL DEFAULT 'User',
         security_question TEXT,
         security_answer TEXT,
+        is_blocked BOOLEAN DEFAULT false,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Ensure existing tables have the is_blocked and last_active columns
+    await pool.query(`
+      ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false;
+    `);
+    await pool.query(`
+      ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
     `);
 
     await pool.query(`
@@ -82,12 +92,58 @@ app.post("/api/auth/login", async (req, res) => {
     );
     if (result.rows.length > 0) {
       const user = result.rows[0];
+      if (user.is_blocked) {
+        return res.status(403).json({ success: false, message: "Ce compte est bloqué" });
+      }
+      
+      // Update last_active on login
+      await pool.query("UPDATE utilisateurs SET last_active = CURRENT_TIMESTAMP WHERE username = $1", [username]);
+      
       res.json({ success: true, user: { username: user.username, role: user.role } });
     } else {
       res.status(401).json({ success: false, message: "Identifiant ou mot de passe incorrect" });
     }
   } catch (err) {
     console.error("Login error:", err);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
+app.get("/api/auth/status/:username", async (req, res) => {
+  const { username } = req.params;
+  try {
+    // Update last_active timestamp
+    await pool.query("UPDATE utilisateurs SET last_active = CURRENT_TIMESTAMP WHERE username = $1", [username]);
+    
+    const result = await pool.query("SELECT is_blocked FROM utilisateurs WHERE username = $1", [username]);
+    if (result.rows.length > 0) {
+      res.json({ success: true, is_blocked: result.rows[0].is_blocked });
+    } else {
+      res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
+    }
+  } catch (err) {
+    console.error("Status check error:", err);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
+app.get("/api/users/active/count", async (req, res) => {
+  try {
+    // Count users active in the last 1 minute
+    const result = await pool.query("SELECT COUNT(*) FROM utilisateurs WHERE last_active >= NOW() - INTERVAL '1 minute'");
+    res.json({ success: true, count: parseInt(result.rows[0].count, 10) });
+  } catch (err) {
+    console.error("Active users count error:", err);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
+app.get("/api/users/active/list", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT username FROM utilisateurs WHERE last_active >= NOW() - INTERVAL '1 minute'");
+    res.json({ success: true, users: result.rows.map(r => r.username) });
+  } catch (err) {
+    console.error("Active users list error:", err);
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 });
@@ -100,7 +156,7 @@ app.post("/api/auth/register/bulk", async (req, res) => {
       const { username, password, role } = user;
       await pool.query(
         "INSERT INTO utilisateurs (username, password, role) VALUES ($1, $2, $3) ON CONFLICT (username) DO NOTHING",
-        [username, password, role || 'Technicien']
+        [username, password, role || 'User']
       );
     }
     await pool.query("COMMIT");
@@ -117,7 +173,7 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     await pool.query(
       "INSERT INTO utilisateurs (username, password, role, security_question, security_answer) VALUES ($1, $2, $3, $4, $5)",
-      [username, password, role || 'Technicien', securityQuestion, securityAnswer]
+      [username, password, role || 'User', securityQuestion, securityAnswer]
     );
     res.json({ success: true });
   } catch (err: any) {
@@ -177,10 +233,33 @@ app.post("/api/auth/recovery/reset", async (req, res) => {
   }
 });
 
+app.post("/api/auth/change-password", async (req, res) => {
+  const { username, currentPassword, newPassword } = req.body;
+  try {
+    const userCheck = await pool.query(
+      "SELECT * FROM utilisateurs WHERE username = $1 AND password = $2",
+      [username, currentPassword]
+    );
+    
+    if (userCheck.rows.length === 0) {
+      return res.status(401).json({ success: false, message: "Mot de passe actuel incorrect" });
+    }
+
+    await pool.query(
+      "UPDATE utilisateurs SET password = $1 WHERE username = $2",
+      [newPassword, username]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Change password error:", err);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
 // User Management Routes
 app.get("/api/users", async (req, res) => {
   try {
-    const result = await pool.query("SELECT username, role, created_at as \"createdAt\" FROM utilisateurs ORDER BY created_at DESC");
+    const result = await pool.query("SELECT username, role, is_blocked, created_at as \"createdAt\" FROM utilisateurs ORDER BY created_at DESC");
     res.json(result.rows);
   } catch (err) {
     console.error("Get users error:", err);
@@ -213,6 +292,21 @@ app.patch("/api/users/:username/role", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Update role error:", err);
+    res.status(500).json({ success: false, message: "Erreur serveur" });
+  }
+});
+
+app.patch("/api/users/:username/block", async (req, res) => {
+  const { username } = req.params;
+  const { is_blocked } = req.body;
+  if (username === 'admin') {
+    return res.status(403).json({ success: false, message: "Impossible de bloquer l'administrateur par défaut" });
+  }
+  try {
+    await pool.query("UPDATE utilisateurs SET is_blocked = $1 WHERE username = $2", [is_blocked, username]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Block user error:", err);
     res.status(500).json({ success: false, message: "Erreur serveur" });
   }
 });

@@ -21,7 +21,7 @@ export const dbService = {
     }
   },
 
-  createUser: async (username: string, pass: string, role: string = 'Technicien', securityQuestion?: string, securityAnswer?: string): Promise<boolean> => {
+  createUser: async (username: string, pass: string, role: string = 'User', securityQuestion?: string, securityAnswer?: string): Promise<boolean> => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -96,6 +96,20 @@ export const dbService = {
       return res.ok;
     } catch (e) {
       return false;
+    }
+  },
+
+  changePassword: async (username: string, currentPassword: string, newPass: string): Promise<{success: boolean, message?: string}> => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, currentPassword, newPassword: newPass })
+      });
+      const data = await res.json();
+      return { success: res.ok, message: data.message };
+    } catch (e) {
+      return { success: false, message: "Erreur de connexion" };
     }
   },
 

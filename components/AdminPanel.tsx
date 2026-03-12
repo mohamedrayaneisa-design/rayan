@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, Shield, User as UserIcon, Check, X, ShieldAlert, Loader2, ShieldCheck, Mail, Key, Search, UserCog, Database } from 'lucide-react';
+import { UserPlus, Trash2, Shield, User as UserIcon, Check, X, ShieldAlert, Loader2, ShieldCheck, Mail, Key, Search, UserCog, Database, Ban, Unlock, Users, Activity } from 'lucide-react';
 import { dbService } from '../services/dbService';
 import { soundService } from '../services/soundService';
 import { User } from '../types';
@@ -12,14 +12,31 @@ const AdminPanel: React.FC = () => {
   const [bulkText, setBulkText] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState('Technicien');
+  const [newRole, setNewRole] = useState('User');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
 
   useEffect(() => {
     loadUsers();
+    fetchActiveUsers();
+    const interval = setInterval(fetchActiveUsers, 10000);
+    return () => clearInterval(interval);
   }, []);
+
+  const fetchActiveUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/active/count`);
+      if (res.ok) {
+        const data = await res.json();
+        setActiveUsersCount(data.count);
+      }
+    } catch (e) {
+      console.error("Failed to fetch active users count", e);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -44,12 +61,7 @@ const AdminPanel: React.FC = () => {
       return;
     }
 
-    // Confirmation Dialog
     soundService.playClick();
-    if (!window.confirm(`Confirmez-vous la création de l'utilisateur "${newUsername}" avec le rôle "${newRole}" ?`)) {
-        return;
-    }
-
     setLoading(true);
     setTimeout(async () => {
       try {
@@ -63,7 +75,7 @@ const AdminPanel: React.FC = () => {
           soundService.playSuccess();
           setNewUsername('');
           setNewPassword('');
-          setNewRole('Technicien');
+          setNewRole('User');
           setShowAddForm(false);
           setError('');
           loadUsers();
@@ -84,25 +96,33 @@ const AdminPanel: React.FC = () => {
       soundService.playError();
       return;
     }
-    
     soundService.playClick();
-    if (window.confirm(`Êtes-vous sûr de vouloir supprimer l'opérateur "${username}" ?`)) {
-      fetch(`${API_BASE_URL}/api/users/${username}`, { method: 'DELETE' })
-        .then(res => res.json())
-        .then(data => {
-          if (data.success) {
-            soundService.playSuccess();
-            loadUsers();
-          }
-        });
-    }
+    setUserToDelete(username);
+  };
+
+  const confirmDeleteUser = () => {
+    if (!userToDelete) return;
+    fetch(`${API_BASE_URL}/api/users/${userToDelete}`, { method: 'DELETE' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          soundService.playSuccess();
+          loadUsers();
+        }
+        setUserToDelete(null);
+      });
   };
 
   const toggleRole = (username: string, currentRole: string) => {
     if (username === 'admin') return;
     
     soundService.playClick();
-    const nextRole = currentRole === 'Super Admin' ? 'Technicien' : 'Super Admin';
+    let nextRole = 'User';
+    if (currentRole === 'User') nextRole = 'Professionnel';
+    else if (currentRole === 'Professionnel') nextRole = 'Super Admin';
+    else if (currentRole === 'Super Admin') nextRole = 'User';
+    else nextRole = 'User'; // Default fallback
+
     fetch(`${API_BASE_URL}/api/users/${username}/role`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -117,12 +137,30 @@ const AdminPanel: React.FC = () => {
       });
   };
 
+  const toggleBlock = (username: string, isBlocked: boolean) => {
+    if (username === 'admin') return;
+    
+    soundService.playClick();
+    fetch(`${API_BASE_URL}/api/users/${username}/block`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_blocked: !isBlocked })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          soundService.playSuccess();
+          loadUsers();
+        }
+      });
+  };
+
   return (
     <div className="flex-grow overflow-hidden flex flex-col p-8 animate-fade-in-up">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-10">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+          <div className="flex items-center gap-3">
             <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-[0_0_20px_rgba(99,102,241,0.15)]">
                 <ShieldCheck className="w-8 h-8 animate-pulse-soft" />
             </div>
@@ -135,6 +173,18 @@ const AdminPanel: React.FC = () => {
                     <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-[0.25em]">Système Actif</p>
                 </div>
             </div>
+          </div>
+
+          {/* Live People Counter in Header */}
+          <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2.5 rounded-2xl border border-white/5 group hover:border-emerald-500/30 transition-all cursor-default">
+            <div className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </div>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Live</span>
+            <div className="w-px h-3 bg-white/10 mx-1"></div>
+            <span className="text-sm font-black text-white">{activeUsersCount}</span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Personnes</span>
           </div>
         </div>
         
@@ -150,15 +200,15 @@ const AdminPanel: React.FC = () => {
                 />
             </div>
 
-            {/* Glass Button: Add Operator */}
+            {/* Professional Button: Add Operator */}
             <button 
                 onClick={() => { soundService.playClick(); setShowAddForm(true); }}
-                className="flex items-center gap-2 px-6 py-3.5 bg-indigo-600/20 backdrop-blur-lg border border-indigo-500/30 text-indigo-100 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 shadow-[0_8px_32px_0_rgba(79,70,229,0.2)] hover:shadow-[0_12px_40px_rgba(79,70,229,0.3)] hover:bg-indigo-600/30 hover:border-indigo-400/50 group active:scale-95 hover:-translate-y-0.5"
+                className="flex items-center gap-2.5 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 shadow-[0_10px_30px_-10px_rgba(79,70,229,0.5)] hover:shadow-[0_15px_40px_-10px_rgba(79,70,229,0.6)] hover:-translate-y-0.5 active:scale-95 group border border-white/10"
             >
-                <div className="p-1 bg-white/20 rounded-full">
-                    <UserPlus className="w-3 h-3 group-hover:scale-110 transition-transform" />
+                <div className="p-1.5 bg-white/20 rounded-lg group-hover:rotate-12 transition-transform">
+                    <UserPlus className="w-3.5 h-3.5" />
                 </div>
-                Ajouter Opérateur
+                <span>Ajouter Opérateur</span>
             </button>
 
             {/* Glass Button: Bulk Import */}
@@ -171,6 +221,50 @@ const AdminPanel: React.FC = () => {
                 </div>
                 Importation Massive
             </button>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="glass-card p-5 rounded-2xl border-white/5 flex items-center gap-4 relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-16 h-16 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition-all"></div>
+            <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400">
+                <Users className="w-6 h-6" />
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total Utilisateurs</p>
+                <p className="text-2xl font-black text-white leading-none">{users.length}</p>
+            </div>
+        </div>
+        <div className="glass-card p-5 rounded-2xl border-white/5 flex items-center gap-4 relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all"></div>
+            <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
+                <Activity className="w-6 h-6" />
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">En Ligne</p>
+                <p className="text-2xl font-black text-white leading-none">{activeUsersCount}</p>
+            </div>
+        </div>
+        <div className="glass-card p-5 rounded-2xl border-white/5 flex items-center gap-4 relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-16 h-16 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all"></div>
+            <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400">
+                <ShieldCheck className="w-6 h-6" />
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Administrateurs</p>
+                <p className="text-2xl font-black text-white leading-none">{users.filter(u => u.role === 'Super Admin' || u.username === 'admin').length}</p>
+            </div>
+        </div>
+        <div className="glass-card p-5 rounded-2xl border-white/5 flex items-center gap-4 relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-16 h-16 bg-rose-500/10 rounded-full blur-xl group-hover:bg-rose-500/20 transition-all"></div>
+            <div className="p-3 bg-rose-500/10 rounded-xl border border-rose-500/20 text-rose-400">
+                <Ban className="w-6 h-6" />
+            </div>
+            <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Comptes Bloqués</p>
+                <p className="text-2xl font-black text-white leading-none">{users.filter(u => u.is_blocked).length}</p>
+            </div>
         </div>
       </div>
 
@@ -204,7 +298,7 @@ const AdminPanel: React.FC = () => {
                                 </h3>
                                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
                                     <span className={`text-[9px] font-black px-3 py-1 rounded-lg uppercase tracking-[0.1em] border shadow-sm transition-colors ${isSuperAdmin ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'bg-slate-800 text-slate-500 border-white/5 group-hover:bg-slate-700'}`}>
-                                        {u.role || 'Technicien'}
+                                        {u.role || 'User'}
                                     </span>
                                     <span className="text-[9px] text-slate-600 font-mono tracking-tighter opacity-70 flex items-center gap-1">
                                         <div className="w-1 h-1 bg-slate-600 rounded-full"></div>
@@ -224,6 +318,23 @@ const AdminPanel: React.FC = () => {
                             >
                                 <UserCog className="w-4 h-4 group-hover/role:rotate-12 transition-transform" />
                                 <span className="text-[9px] font-black uppercase tracking-widest hidden lg:block">Rôle</span>
+                            </button>
+                            
+                            {/* Glass Button: Block */}
+                            <button 
+                                onClick={() => toggleBlock(u.username, u.is_blocked || false)}
+                                disabled={u.username === 'admin'}
+                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl backdrop-blur-md border transition-all disabled:opacity-20 group/block active:scale-95 shadow-lg ${u.is_blocked ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20' : 'bg-white/5 border-white/10 text-slate-400 hover:text-amber-300 hover:border-amber-400/30 hover:bg-amber-500/10'}`}
+                                title={u.is_blocked ? "Débloquer l'utilisateur" : "Bloquer l'utilisateur"}
+                            >
+                                {u.is_blocked ? (
+                                    <Unlock className="w-4 h-4 group-hover/block:scale-110 transition-transform" />
+                                ) : (
+                                    <Ban className="w-4 h-4 group-hover/block:scale-110 transition-transform" />
+                                )}
+                                <span className="text-[9px] font-black uppercase tracking-widest hidden lg:block">
+                                    {u.is_blocked ? 'Débloquer' : 'Bloquer'}
+                                </span>
                             </button>
                             
                             {/* Glass Button: Delete */}
@@ -262,7 +373,7 @@ const AdminPanel: React.FC = () => {
                 <div className="mb-6 p-4 bg-slate-800/50 rounded-2xl border border-white/5">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Format attendu :</p>
                     <code className="text-[10px] text-emerald-400 font-mono block">utilisateur:motdepasse:role</code>
-                    <p className="text-[9px] text-slate-500 mt-2 italic">Exemple : hicham:pass123:Technicien (un par ligne)</p>
+                    <p className="text-[9px] text-slate-500 mt-2 italic">Exemple : hicham:pass123:User (un par ligne)</p>
                 </div>
 
                 <div className="space-y-5">
@@ -270,7 +381,7 @@ const AdminPanel: React.FC = () => {
                         value={bulkText}
                         onChange={(e) => setBulkText(e.target.value)}
                         className="w-full h-48 bg-slate-950 border border-white/5 rounded-2xl px-5 py-4 text-sm font-mono text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 transition-all shadow-inner"
-                        placeholder="user1:pass1:Technicien&#10;user2:pass2:Super Admin"
+                        placeholder="user1:pass1:User&#10;user2:pass2:Super Admin"
                     />
 
                     {error && (
@@ -287,7 +398,7 @@ const AdminPanel: React.FC = () => {
                             const lines = bulkText.trim().split('\n');
                             const usersToCreate = lines.map(line => {
                                 const [username, password, role] = line.split(':');
-                                return { username: username?.trim(), password: password?.trim(), role: role?.trim() || 'Technicien' };
+                                return { username: username?.trim(), password: password?.trim(), role: role?.trim() || 'User' };
                             }).filter(u => u.username && u.password);
 
                             try {
@@ -325,71 +436,72 @@ const AdminPanel: React.FC = () => {
       {showAddForm && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-fade-in" onClick={() => setShowAddForm(false)}></div>
-          <div className="relative w-full max-w-md bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.8)] overflow-hidden animate-fade-in-up ring-1 ring-white/5">
+          <div className="relative w-full max-w-md bg-[#0f172a] border border-white/10 rounded-[2.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.8)] overflow-hidden animate-fade-in-up ring-1 ring-white/5">
             <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-indigo-500 to-transparent"></div>
             
             <div className="p-8">
-                <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-black text-white flex items-center gap-3 tracking-tighter">
-                    <UserPlus className="w-6 h-6 text-indigo-500" />
-                    Nouvel Opérateur
-                </h3>
-                <button onClick={() => { soundService.playClick(); setShowAddForm(false); }} className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded-full transition-all"><X /></button>
+                <div className="flex items-center justify-between mb-10">
+                  <h3 className="text-2xl font-black text-white flex items-center gap-4 tracking-tighter">
+                      <UserPlus className="w-7 h-7 text-indigo-500" />
+                      Nouvel Opérateur
+                  </h3>
+                  <button onClick={() => { soundService.playClick(); setShowAddForm(false); }} className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded-full transition-all">
+                    <X className="w-6 h-6" />
+                  </button>
                 </div>
 
-                <form onSubmit={handleAddUser} className="space-y-5">
-                    <div className="space-y-2">
+                <form onSubmit={handleAddUser} className="space-y-8">
+                    <div className="space-y-3">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] ml-1 flex items-center gap-2">
-                            <Mail className="w-3 h-3" /> Identifiant
+                            <Mail className="w-3.5 h-3.5" /> IDENTIFIANT
                         </label>
                         <input 
                             type="text" 
                             value={newUsername}
                             onChange={(e) => setNewUsername(e.target.value)}
-                            className="w-full bg-slate-900 border border-white/5 rounded-2xl px-5 py-4 text-sm font-bold text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner focus:bg-slate-800"
+                            className="w-full bg-slate-900/50 border border-white/5 rounded-2xl px-6 py-4.5 text-sm font-bold text-white placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all shadow-inner"
                             placeholder="ex: hicham_pro"
                         />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] ml-1 flex items-center gap-2">
-                            <Key className="w-3 h-3" /> Mot de Passe
+                            <Key className="w-3.5 h-3.5" /> MOT DE PASSE
                         </label>
                         <input 
                             type="password" 
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
-                            className="w-full bg-slate-900 border border-white/5 rounded-2xl px-5 py-4 text-sm font-bold text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all shadow-inner focus:bg-slate-800"
+                            className="w-full bg-slate-900/50 border border-white/5 rounded-2xl px-6 py-4.5 text-sm font-bold text-white placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all shadow-inner"
                             placeholder="••••••••"
                         />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em] ml-1 flex items-center gap-2">
-                            <Shield className="w-3 h-3" /> Rôle Système
+                            <Shield className="w-3.5 h-3.5" /> RÔLE SYSTÈME
                         </label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button 
-                                type="button"
-                                onClick={() => { soundService.playHover(); setNewRole('Technicien'); }}
-                                className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex flex-col items-center gap-2 ${newRole === 'Technicien' ? 'bg-indigo-500/10 border-indigo-500/40 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-slate-900 border-white/5 text-slate-500 hover:border-white/20 hover:bg-slate-800'}`}
-                            >
-                                <UserIcon className="w-4 h-4" />
-                                Technicien
-                            </button>
-                            <button 
-                                type="button"
-                                onClick={() => { soundService.playHover(); setNewRole('Super Admin'); }}
-                                className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex flex-col items-center gap-2 ${newRole === 'Super Admin' ? 'bg-indigo-500/10 border-indigo-500/40 text-white shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-slate-900 border-white/5 text-slate-500 hover:border-white/20 hover:bg-slate-800'}`}
-                            >
-                                <ShieldCheck className="w-4 h-4" />
-                                Super Admin
-                            </button>
+                        <div className="grid grid-cols-3 gap-3">
+                            {[
+                                { id: 'User', label: 'USER', icon: UserIcon },
+                                { id: 'Professionnel', label: 'PRO', icon: Shield },
+                                { id: 'Super Admin', label: 'ADMIN', icon: ShieldCheck }
+                            ].map((role) => (
+                                <button
+                                    key={role.id}
+                                    type="button"
+                                    onClick={() => { soundService.playClick(); setNewRole(role.id); }}
+                                    className={`flex flex-col items-center justify-center gap-3 p-4 rounded-2xl border transition-all duration-300 ${newRole === role.id ? 'bg-indigo-500/10 border-indigo-500/50 text-white ring-2 ring-indigo-500/20' : 'bg-slate-900/40 border-white/5 text-slate-500 hover:border-white/10'}`}
+                                >
+                                    <role.icon className={`w-5 h-5 ${newRole === role.id ? 'text-indigo-400' : 'text-slate-600'}`} />
+                                    <span className="text-[9px] font-black tracking-widest">{role.label}</span>
+                                </button>
+                            ))}
                         </div>
                     </div>
 
                     {error && (
-                        <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black text-center uppercase tracking-[0.2em] animate-pulse">
+                        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black text-center uppercase tracking-[0.2em] animate-pulse">
                             {error}
                         </div>
                     )}
@@ -397,11 +509,44 @@ const AdminPanel: React.FC = () => {
                     <button 
                         type="submit"
                         disabled={loading}
-                        className="w-full py-4.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-[0_20px_40px_rgba(79,70,229,0.3)] transition-all group active:scale-[0.98] flex items-center justify-center gap-3 text-xs uppercase tracking-[0.2em] border border-indigo-400/20 hover:shadow-[0_25px_50px_rgba(79,70,229,0.4)] hover:-translate-y-0.5"
+                        className="w-full py-4.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black rounded-2xl shadow-[0_20px_40px_rgba(79,70,229,0.3)] transition-all group active:scale-[0.98] flex items-center justify-center gap-3 text-xs uppercase tracking-[0.2em] border border-white/10 hover:shadow-[0_25px_50px_rgba(79,70,229,0.4)] hover:-translate-y-0.5"
                     >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Check className="w-5 h-5" /> Confirmer Accès</>}
+                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Check className="w-5 h-5" /> CONFIRMER ACCÈS</>}
                     </button>
                 </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md animate-fade-in" onClick={() => setUserToDelete(null)}></div>
+          <div className="relative w-full max-w-sm bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.8)] overflow-hidden animate-fade-in-up ring-1 ring-white/5">
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-rose-500 to-transparent"></div>
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-rose-500/20">
+                <Trash2 className="w-8 h-8 text-rose-500" />
+              </div>
+              <h3 className="text-xl font-black text-white mb-2 tracking-tighter">Supprimer l'utilisateur ?</h3>
+              <p className="text-sm text-slate-400 mb-8">
+                Êtes-vous sûr de vouloir supprimer l'opérateur <span className="text-white font-bold">"{userToDelete}"</span> ? Cette action est irréversible.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setUserToDelete(null)}
+                  className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all text-xs uppercase tracking-widest border border-white/5"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={confirmDeleteUser}
+                  className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all text-xs uppercase tracking-widest border border-rose-400/20 shadow-[0_0_20px_rgba(225,29,72,0.3)]"
+                >
+                  Supprimer
+                </button>
+              </div>
             </div>
           </div>
         </div>

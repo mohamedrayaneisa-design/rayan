@@ -207,7 +207,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
             const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, role: 'Technicien', securityQuestion, securityAnswer })
+                body: JSON.stringify({ username, password, role: 'User', securityQuestion, securityAnswer })
             });
             const data = await response.json();
             if (data.success) {
@@ -593,15 +593,13 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
 
             <div className="mt-6 text-center border-t border-white/5 pt-4">
                 <button 
-                    onClick={isRecovering ? handleRecoveryToggle : handleToggleMode}
+                    onClick={isRecovering ? handleRecoveryToggle : handleRecoveryToggle}
                     className="text-xs text-slate-400 hover:text-white transition-colors flex items-center justify-center gap-1 mx-auto group"
                 >
                     {isRecovering ? (
                         <>Annuler la récupération</>
-                    ) : isRegistering ? (
-                        <>Déjà un compte ? <span className="text-emerald-400 group-hover:underline underline-offset-4">Se connecter</span></>
                     ) : (
-                        <>Pas encore de compte ? <span className="text-primary group-hover:underline underline-offset-4">S'inscrire</span></>
+                        <>Mot de passe oublié ? <span className="text-amber-400 group-hover:underline underline-offset-4">Récupérer</span></>
                     )}
                 </button>
             </div>
